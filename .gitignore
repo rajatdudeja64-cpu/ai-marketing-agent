@@ -4,3 +4,6 @@ __pycache__/
 *.pyc
 activity_log.jsonl
 .DS_Store
+
+credentials.json
+google-ads.yaml

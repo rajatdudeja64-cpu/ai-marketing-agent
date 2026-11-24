@@ -2,11 +2,12 @@ import json
 from pathlib import Path
 import streamlit as st
 from agents.orchestrator import run_marketing_workflow
+from agents.ads_agent import execute_approved_google_ads_campaign, fetch_account_campaigns
 from safety.guardrails import log_activity
 
 st.set_page_config(page_title="AI Marketing Agent", layout="wide")
 st.title("Autonomous AI Marketing Agent — Control Center")
-st.caption("Stage 1 Multi-Agent Architecture: Strategy → Research → Content → Safety & Approval Gate")
+st.caption("Stage 2: Multi-Agent Planning + Live Google Ads API (Test Sandbox) with Hard Safety Controls")
 
 with st.sidebar:
     st.header("Safety & Budget Controls")
@@ -15,6 +16,11 @@ with st.sidebar:
     max_daily = st.number_input("Hard Daily Spend Cap", min_value=100, value=1000, step=100)
     if emergency_stop:
         st.error("EMERGENCY STOP ACTIVE — All campaign actions are blocked.")
+
+    st.divider()
+    st.header("Google Ads Connection")
+    login_customer_id = st.text_input("Manager Account ID", value="5201301135")
+    customer_id = st.text_input("Client Account ID", value="7315795729")
 
 with st.form("business_form"):
     col1, col2 = st.columns(2)
@@ -51,11 +57,11 @@ if submitted:
             )
             st.session_state["last_result"] = result
             st.session_state["last_business"] = business
-            st.session_state["approved"] = False
+            st.session_state["ads_launch_result"] = None
             if result["blocked"]:
                 status_box.update(label="Blocked by Safety Guardrails", state="error")
             else:
-                status_box.update(label="All 3 Agents Finished — Ready for Your Approval", state="complete")
+                status_box.update(label="All 3 Agents Finished — Ready for Approval & Google Ads Launch", state="complete")
         except Exception as e:
             status_box.update(label="Agent Error", state="error")
             st.error(f"Something went wrong: {e}")
@@ -72,7 +78,7 @@ if result:
         research = result["research"]
         content = result["content"]
 
-        tab1, tab2, tab3, tab4 = st.tabs(["1. Strategy", "2. Keywords & Audience", "3. Ads & Instagram", "4. Approve & Audit Log"])
+        tab1, tab2, tab3, tab4 = st.tabs(["1. Strategy", "2. Keywords & Audience", "3. Ads & Instagram", "4. Launch to Google Ads"])
 
         with tab1:
             st.subheader("Positioning & Target Persona")
@@ -119,18 +125,54 @@ if result:
                     st.write("**Hashtags:** " + " ".join(post.get("hashtags", [])))
 
         with tab4:
-            st.subheader("Human Approval Gate")
-            if st.session_state.get("approved"):
-                st.success("Campaign plan APPROVED and recorded in activity_log.jsonl (ready for Stage 2 Google Ads test execution).")
-            else:
-                st.info("No money will be spent and no ads will be created until you explicitly approve this plan.")
-                if st.button("Approve Campaign Plan", type="primary"):
-                    log_activity("HUMAN_APPROVAL", {"business": business["name"], "budget": business["monthly_budget"]}, status="APPROVED")
-                    st.session_state["approved"] = True
-                    st.rerun()
+            st.subheader("Google Ads Campaign Preview & Approval Gate")
+            gads_monthly = float(strategy["google_ads_monthly_budget"])
+            daily_preview = round(gads_monthly / 30, 2)
+            st.info(
+                f"**Campaign Name:** {business['name']} - AI Search  \n"
+                f"**Target Account:** {customer_id} (Test Sandbox)  \n"
+                f"**Daily Budget:** {cur} {daily_preview:,.2f}/day  \n"
+                f"**Initial Status:** PAUSED (safe — no ads will serve automatically)"
+            )
 
-            st.subheader("Recent Activity Audit Log")
-            log_path = Path("activity_log.jsonl")
-            if log_path.exists():
-                lines = log_path.read_text(encoding="utf-8").strip().splitlines()[-8:]
-                st.json([json.loads(line) for line in reversed(lines)])
+            if st.button("Approve & Create PAUSED Campaign in Google Ads", type="primary", disabled=emergency_stop):
+                with st.spinner("Sending approved campaign to Google Ads API (v26)..."):
+                    try:
+                        log_activity("HUMAN_APPROVAL", {"business": business["name"], "daily_budget": daily_preview}, status="APPROVED")
+                        launch = execute_approved_google_ads_campaign(
+                            business_name=business["name"],
+                            google_ads_monthly_budget=gads_monthly,
+                            max_monthly=float(max_monthly),
+                            max_daily=float(max_daily),
+                            customer_id=customer_id,
+                            login_customer_id=login_customer_id,
+                            emergency_stop=emergency_stop,
+                        )
+                        st.session_state["ads_launch_result"] = launch
+                    except Exception as e:
+                        st.error(f"Google Ads API Error: {e}")
+
+            launch = st.session_state.get("ads_launch_result")
+            if launch:
+                if launch["success"]:
+                    st.success(f"{launch['message']} Resource: `{launch['data']['campaign_resource']}`")
+                else:
+                    st.error(launch["message"])
+
+st.divider()
+st.subheader("Live Campaigns in Google Ads Account")
+if st.button("Refresh Live Campaigns from Google Ads"):
+    with st.spinner("Fetching campaigns from Google Ads API..."):
+        try:
+            st.session_state["live_campaigns"] = fetch_account_campaigns(customer_id, login_customer_id)
+        except Exception as e:
+            st.error(f"Could not fetch campaigns: {e}")
+
+if st.session_state.get("live_campaigns"):
+    st.table(st.session_state["live_campaigns"])
+
+with st.expander("Recent Activity Audit Log"):
+    log_path = Path("activity_log.jsonl")
+    if log_path.exists():
+        lines = log_path.read_text(encoding="utf-8").strip().splitlines()[-10:]
+        st.json([json.loads(line) for line in reversed(lines)])
