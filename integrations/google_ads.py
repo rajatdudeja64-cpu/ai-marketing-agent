@@ -25,6 +25,13 @@ def _headers(login_customer_id: str, credentials_path: str = "credentials.json")
     }
 
 
+def _post_mutate(url: str, headers: dict, payload: dict, label: str) -> dict:
+    resp = requests.post(url, headers=headers, json=payload, timeout=30)
+    if not resp.ok:
+        raise RuntimeError(f"{label} failed ({resp.status_code}): {resp.text}")
+    return resp.json()
+
+
 def query_google_ads(
     customer_id: str,
     login_customer_id: str,
@@ -48,65 +55,160 @@ def query_google_ads(
     return rows
 
 
-def create_paused_search_campaign(
+def create_full_paused_search_campaign(
     customer_id: str,
     login_customer_id: str,
     campaign_name: str,
     daily_budget_amount: float,
+    keywords: list[dict],
+    headlines: list[str],
+    descriptions: list[str],
+    final_url: str,
     credentials_path: str = "credentials.json",
 ) -> dict:
-    """Create a real PAUSED Search campaign with a daily budget in Google Ads."""
+    """Create a PAUSED Search campaign with Budget, Ad Group, Keywords, and Responsive Search Ad."""
     headers = _headers(login_customer_id, credentials_path)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
 
-    # 1. Create the daily Campaign Budget (Google Ads stores amounts in micros: 1 INR = 1,000,000 micros)
-    budget_url = f"{BASE_URL}/customers/{customer_id}/campaignBudgets:mutate"
-    budget_payload = {
-        "operations": [
-            {
-                "create": {
-                    "name": f"{campaign_name} Budget {stamp}",
-                    "amountMicros": str(int(daily_budget_amount * 1_000_000)),
-                    "deliveryMethod": "STANDARD",
-                    "explicitlyShared": False,
+    # 1. Daily Campaign Budget (micros: 1 unit = 1,000,000 micros)
+    budget_res = _post_mutate(
+        f"{BASE_URL}/customers/{customer_id}/campaignBudgets:mutate",
+        headers,
+        {
+            "operations": [
+                {
+                    "create": {
+                        "name": f"{campaign_name} Budget {stamp}",
+                        "amountMicros": str(int(daily_budget_amount * 1_000_000)),
+                        "deliveryMethod": "STANDARD",
+                        "explicitlyShared": False,
+                    }
                 }
-            }
-        ]
-    }
-    b_resp = requests.post(budget_url, headers=headers, json=budget_payload, timeout=30)
-    if not b_resp.ok:
-        raise RuntimeError(f"Budget creation failed {b_resp.status_code}: {b_resp.text}")
-    budget_resource = b_resp.json()["results"][0]["resourceName"]
+            ]
+        },
+        "Budget creation",
+    )
+    budget_resource = budget_res["results"][0]["resourceName"]
 
-    # 2. Create the Search Campaign (strictly PAUSED by default for safety)
-    camp_url = f"{BASE_URL}/customers/{customer_id}/campaigns:mutate"
-    camp_payload = {
-        "operations": [
-            {
-                "create": {
-                    "name": f"{campaign_name} ({stamp})",
-                    "advertisingChannelType": "SEARCH",
-                    "status": "PAUSED",
-                    "manualCpc": {},
-                    "campaignBudget": budget_resource,
-                    "containsEuPoliticalAdvertising": "DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING",
-                    "networkSettings": {
-                        "targetGoogleSearch": True,
-                        "targetSearchNetwork": False,
-                        "targetContentNetwork": False,
-                    },
+    # 2. PAUSED Search Campaign
+    camp_res = _post_mutate(
+        f"{BASE_URL}/customers/{customer_id}/campaigns:mutate",
+        headers,
+        {
+            "operations": [
+                {
+                    "create": {
+                        "name": f"{campaign_name} ({stamp})",
+                        "advertisingChannelType": "SEARCH",
+                        "status": "PAUSED",
+                        "manualCpc": {},
+                        "campaignBudget": budget_resource,
+                        "containsEuPoliticalAdvertising": "DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING",
+                        "networkSettings": {
+                            "targetGoogleSearch": True,
+                            "targetSearchNetwork": False,
+                            "targetContentNetwork": False,
+                        },
+                    }
                 }
-            }
-        ]
-    }
-    c_resp = requests.post(camp_url, headers=headers, json=camp_payload, timeout=30)
-    if not c_resp.ok:
-        raise RuntimeError(f"Campaign creation failed {c_resp.status_code}: {c_resp.text}")
-    campaign_resource = c_resp.json()["results"][0]["resourceName"]
+            ]
+        },
+        "Campaign creation",
+    )
+    campaign_resource = camp_res["results"][0]["resourceName"]
+
+    # 3. Ad Group
+    ag_res = _post_mutate(
+        f"{BASE_URL}/customers/{customer_id}/adGroups:mutate",
+        headers,
+        {
+            "operations": [
+                {
+                    "create": {
+                        "name": f"{campaign_name} - Main Ad Group",
+                        "campaign": campaign_resource,
+                        "type": "SEARCH_STANDARD",
+                        "status": "ENABLED",
+                        "cpcBidMicros": "10000000",
+                    }
+                }
+            ]
+        },
+        "Ad Group creation",
+    )
+    ad_group_resource = ag_res["results"][0]["resourceName"]
+
+    # 4. High-Intent Keywords (Exact / Phrase)
+    kw_ops = []
+    seen_kw = set()
+    for item in keywords:
+        text = str(item.get("keyword", "")).strip()
+        match_raw = str(item.get("match_type", "PHRASE")).upper()
+        match_type = "EXACT" if "EXACT" in match_raw else "PHRASE"
+        key = (text.lower(), match_type)
+        if text and key not in seen_kw:
+            seen_kw.add(key)
+            kw_ops.append(
+                {
+                    "create": {
+                        "adGroup": ad_group_resource,
+                        "status": "ENABLED",
+                        "keyword": {"text": text, "matchType": match_type},
+                    }
+                }
+            )
+    kw_count = 0
+    if kw_ops:
+        kw_res = _post_mutate(
+            f"{BASE_URL}/customers/{customer_id}/adGroupCriteria:mutate",
+            headers,
+            {"operations": kw_ops},
+            "Keywords creation",
+        )
+        kw_count = len(kw_res.get("results", []))
+
+    # 5. Responsive Search Ad (deduplicated & safely trimmed to 30/90 chars)
+    clean_headlines = []
+    for h in headlines:
+        h_clean = h.strip()[:30]
+        if h_clean and h_clean not in clean_headlines:
+            clean_headlines.append(h_clean)
+    clean_descriptions = []
+    for d in descriptions:
+        d_clean = d.strip()[:90]
+        if d_clean and d_clean not in clean_descriptions:
+            clean_descriptions.append(d_clean)
+
+    ad_res = _post_mutate(
+        f"{BASE_URL}/customers/{customer_id}/adGroupAds:mutate",
+        headers,
+        {
+            "operations": [
+                {
+                    "create": {
+                        "adGroup": ad_group_resource,
+                        "status": "ENABLED",
+                        "ad": {
+                            "finalUrls": [final_url],
+                            "responsiveSearchAd": {
+                                "headlines": [{"text": h} for h in clean_headlines[:15]],
+                                "descriptions": [{"text": d} for d in clean_descriptions[:4]],
+                            },
+                        },
+                    }
+                }
+            ]
+        },
+        "Responsive Search Ad creation",
+    )
+    ad_resource = ad_res["results"][0]["resourceName"]
 
     return {
         "campaign_resource": campaign_resource,
         "budget_resource": budget_resource,
+        "ad_group_resource": ad_group_resource,
+        "ad_resource": ad_resource,
+        "keywords_added": kw_count,
         "status": "PAUSED",
         "daily_budget": daily_budget_amount,
     }

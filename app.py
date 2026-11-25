@@ -135,7 +135,8 @@ if result:
                 f"**Initial Status:** PAUSED (safe — no ads will serve automatically)"
             )
 
-            if st.button("Approve & Create PAUSED Campaign in Google Ads", type="primary", disabled=emergency_stop):
+            final_url = st.text_input("Landing Page URL (required by Google Ads)", value="https://example.com")
+            if st.button("Approve & Launch Full PAUSED Campaign (Ad Group + Keywords + Ad)", type="primary", disabled=emergency_stop):
                 with st.spinner("Sending approved campaign to Google Ads API (v26)..."):
                     try:
                         log_activity("HUMAN_APPROVAL", {"business": business["name"], "daily_budget": daily_preview}, status="APPROVED")
@@ -146,6 +147,10 @@ if result:
                             max_daily=float(max_daily),
                             customer_id=customer_id,
                             login_customer_id=login_customer_id,
+                            keywords=research.get("high_intent_keywords", []),
+                            headlines=content.get("google_ads_headlines", []),
+                            descriptions=content.get("google_ads_descriptions", []),
+                            final_url=final_url,
                             emergency_stop=emergency_stop,
                         )
                         st.session_state["ads_launch_result"] = launch

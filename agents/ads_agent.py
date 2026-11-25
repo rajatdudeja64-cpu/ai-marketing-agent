@@ -1,4 +1,4 @@
-from integrations.google_ads import create_paused_search_campaign, list_campaigns
+from integrations.google_ads import create_full_paused_search_campaign, list_campaigns
 from safety.guardrails import check_budget_guardrail, log_activity
 
 
@@ -9,9 +9,13 @@ def execute_approved_google_ads_campaign(
     max_daily: float,
     customer_id: str,
     login_customer_id: str,
+    keywords: list[dict],
+    headlines: list[str],
+    descriptions: list[str],
+    final_url: str,
     emergency_stop: bool = False,
 ) -> dict:
-    """Re-verify safety guardrails, then create a real PAUSED Search campaign in Google Ads."""
+    """Re-verify safety guardrails, then create a complete PAUSED Search campaign in Google Ads."""
     allowed, msg = check_budget_guardrail(
         requested_monthly=google_ads_monthly_budget,
         max_monthly=max_monthly,
@@ -24,24 +28,35 @@ def execute_approved_google_ads_campaign(
     daily_budget = max(1.0, round(google_ads_monthly_budget / 30, 2))
     campaign_name = f"{business_name} - AI Search"
 
-    result = create_paused_search_campaign(
+    result = create_full_paused_search_campaign(
         customer_id=customer_id.replace("-", "").strip(),
         login_customer_id=login_customer_id.replace("-", "").strip(),
         campaign_name=campaign_name,
         daily_budget_amount=daily_budget,
+        keywords=keywords,
+        headlines=headlines,
+        descriptions=descriptions,
+        final_url=final_url.strip(),
     )
     log_activity(
-        "GOOGLE_ADS_CAMPAIGN_CREATED",
+        "GOOGLE_ADS_FULL_CAMPAIGN_CREATED",
         {
             "business": business_name,
             "customer_id": customer_id,
             "campaign_resource": result["campaign_resource"],
+            "ad_group_resource": result["ad_group_resource"],
+            "ad_resource": result["ad_resource"],
+            "keywords_added": result["keywords_added"],
             "daily_budget": daily_budget,
             "status": "PAUSED",
         },
         status="EXECUTED",
     )
-    return {"success": True, "message": "PAUSED campaign created in Google Ads!", "data": result}
+    return {
+        "success": True,
+        "message": f"PAUSED campaign created with Ad Group, {result['keywords_added']} keywords, and Responsive Search Ad!",
+        "data": result,
+    }
 
 
 def fetch_account_campaigns(customer_id: str, login_customer_id: str) -> list[dict]:
