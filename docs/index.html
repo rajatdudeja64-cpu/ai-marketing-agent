@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Autonomous AI Marketing Agent — Control Center</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <span class="badge">Stage 3 · Web Demo</span>
+        <h2>Control Center</h2>
+      </div>
+
+      <section class="panel">
+        <h3>Safety &amp; Budget Controls</h3>
+        <label class="toggle-row">
+          <input type="checkbox" id="emergencyStop" />
+          <span>Emergency Stop (Pause All Actions)</span>
+        </label>
+        <div id="emergencyBanner" class="alert alert-error hidden">
+          EMERGENCY STOP ACTIVE — All campaign actions are blocked.
+        </div>
+
+        <label class="field">
+          <span>Hard Monthly Budget Limit</span>
+          <input type="number" id="maxMonthly" min="1000" step="1000" value="25000" />
+        </label>
+        <label class="field">
+          <span>Hard Daily Spend Cap</span>
+          <input type="number" id="maxDaily" min="100" step="100" value="1000" />
+        </label>
+      </section>
+
+      <section class="panel">
+        <h3>Marketing Strategy</h3>
+        <div id="strategyRadios" class="radio-group"></div>
+        <p id="strategySummary" class="muted"></p>
+
+        <label class="field">
+          <span>Google Ads share of monthly budget (<strong id="shareLabel">70%</strong>)</span>
+          <input type="range" id="googleShare" min="10" max="90" step="5" value="70" />
+        </label>
+        <p id="instagramShareCaption" class="muted"></p>
+
+        <details open class="expander">
+          <summary>Agent inputs</summary>
+          <p class="muted">Sent to Strategy, Research, and Content agents on the next run.</p>
+          <label class="field"><span>Positioning</span><textarea id="cfgPositioning" rows="3"></textarea></label>
+          <label class="field"><span>Ideal buyer</span><input type="text" id="cfgPersona" /></label>
+          <label class="field"><span>Offer</span><textarea id="cfgOffer" rows="2"></textarea></label>
+          <label class="field"><span>Tone</span><input type="text" id="cfgTone" /></label>
+          <label class="field"><span>Primary channel</span><input type="text" id="cfgChannel" /></label>
+          <label class="field"><span>Keyword focus</span><textarea id="cfgKeywordFocus" rows="2"></textarea></label>
+          <label class="field"><span>Core steps (one per line)</span><textarea id="cfgSteps" rows="4"></textarea></label>
+          <label class="field"><span>Extra instructions</span><textarea id="cfgNotes" rows="2" placeholder="Example: stay inside Gurugram, do not mention discounts"></textarea></label>
+        </details>
+
+        <label class="toggle-row">
+          <input type="checkbox" id="includeLiveSamples" checked />
+          <span>Send live campaign samples to the agent</span>
+        </label>
+        <label class="field">
+          <span>Live campaign samples (5–100)</span>
+          <input type="number" id="sampleLimit" min="5" max="100" step="5" value="50" />
+        </label>
+      </section>
+
+      <section class="panel">
+        <h3>AI Engine Mode</h3>
+        <label class="field">
+          <span>Optional Gemini API Key (browser-only)</span>
+          <input type="password" id="geminiKey" placeholder="Leave blank for instant Demo Mode" autocomplete="off" />
+        </label>
+        <p class="muted">
+          Key stays in your browser session only and calls Gemini directly. Leave empty to test the full multi-agent workflow in instant Demo Mode.
+        </p>
+      </section>
+
+      <section class="panel">
+        <h3>Google Ads Connection</h3>
+        <label class="field"><span>Manager Account ID</span><input type="text" id="loginCustomerId" value="5201301135" /></label>
+        <label class="field"><span>Client Account ID</span><input type="text" id="customerId" value="7315795729" /></label>
+        <p class="muted">Static GitHub Pages simulates Google Ads API calls safely. For live API v26 mutations, run the Python Streamlit app locally or on Streamlit Community Cloud.</p>
+      </section>
+    </aside>
+
+    <main class="main">
+      <header class="page-header">
+        <h1>Autonomous AI Marketing Agent — Control Center</h1>
+        <p class="subtitle">
+          Stage 3: Strategy Presets, Multi-Agent Planning &amp; Google Ads Safety Controls ·
+          <a href="https://github.com/rajatdudeja64-cpu/ai-marketing-agent" target="_blank" rel="noopener">View Repository</a>
+        </p>
+      </header>
+
+      <div id="selectedStrategyBanner" class="alert alert-info"></div>
+
+      <form id="businessForm" class="card form-grid">
+        <div class="col">
+          <label class="field">
+            <span>Business Name</span>
+            <input type="text" id="bizName" value="Milkbasket" required />
+          </label>
+          <label class="field">
+            <span>Target Audience &amp; Location</span>
+            <input type="text" id="bizAudience" value="Urban households and working families in Delhi NCR who reorder milk and daily essentials" />
+          </label>
+          <label class="field">
+            <span>Primary Marketing Goal</span>
+            <select id="bizGoal">
+              <option>Get More Sales</option>
+              <option>Generate Leads</option>
+              <option>Build Brand Awareness</option>
+            </select>
+          </label>
+        </div>
+        <div class="col">
+          <label class="field">
+            <span>What do you sell?</span>
+            <textarea id="bizProduct" rows="3" required>Early-morning doorstep delivery of fresh milk, bread, eggs, fruits, and daily groceries. Order by midnight, delivered before 7 AM on a repeat subscription.</textarea>
+          </label>
+          <div class="budget-row">
+            <label class="field">
+              <span>Requested Monthly Ad Budget</span>
+              <input type="number" id="bizBudget" min="0" step="1000" value="20000" />
+            </label>
+            <label class="field">
+              <span>Currency</span>
+              <select id="bizCurrency">
+                <option>INR</option>
+                <option>USD</option>
+                <option>GBP</option>
+                <option>EUR</option>
+              </select>
+            </label>
+          </div>
+          <button type="submit" id="runBtn" class="btn-primary">Run Multi-Agent Workflow</button>
+        </div>
+      </form>
+
+      <div id="statusBox" class="card status-box hidden">
+        <div id="statusTitle" class="status-title"></div>
+        <ul id="statusSteps" class="status-steps"></ul>
+      </div>
+
+      <div id="guardrailResult" class="alert hidden"></div>
+
+      <section id="resultsSection" class="card hidden">
+        <div class="tabs" role="tablist">
+          <button class="tab active" data-tab="tab1">1. Strategy</button>
+          <button class="tab" data-tab="tab2">2. Keywords &amp; Audience</button>
+          <button class="tab" data-tab="tab3">3. Ads &amp; Instagram</button>
+          <button class="tab" data-tab="tab4">4. Launch to Google Ads</button>
+        </div>
+
+        <div id="tab1" class="tab-panel active"></div>
+        <div id="tab2" class="tab-panel"></div>
+        <div id="tab3" class="tab-panel"></div>
+        <div id="tab4" class="tab-panel"></div>
+      </section>
+
+      <section class="card">
+        <div class="section-header">
+          <div>
+            <h2>Live Campaigns in Google Ads Account</h2>
+            <p class="muted">
+              Refresh reads existing campaigns (with channel, daily budget, and 30-day delivery metrics). On GitHub Pages, this loads a realistic test-sandbox dataset so you can test live-context injection without exposing credentials.
+            </p>
+          </div>
+          <button type="button" id="refreshCampaignsBtn" class="btn-secondary">Refresh Live Campaigns</button>
+        </div>
+        <p id="sampleCaption" class="muted"></p>
+        <div id="campaignsTableWrap" class="table-wrap"></div>
+      </section>
+
+      <details class="card expander">
+        <summary>Recent Activity Audit Log</summary>
+        <div class="audit-actions">
+          <button type="button" id="clearLogBtn" class="btn-link">Clear local audit log</button>
+        </div>
+        <pre id="auditLogView" class="code-box">[]</pre>
+      </details>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

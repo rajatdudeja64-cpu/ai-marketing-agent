@@ -1,6 +1,7 @@
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 
 LOG_FILE = Path("activity_log.jsonl")
 
@@ -46,13 +47,44 @@ def check_budget_guardrail(
     return True, f"PASSED: Budget within limits (~{estimated_daily:,.0f}/day)."
 
 
+def validate_landing_url(url: str) -> tuple[bool, str]:
+    """Validate that a Google Ads landing page URL uses http(s) and includes a host."""
+    cleaned = (url or "").strip()
+    if not cleaned:
+        return False, "BLOCKED: Landing Page URL is required."
+    parsed = urlparse(cleaned)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return False, "BLOCKED: Landing Page URL must start with http:// or https:// and include a valid domain."
+    if "." not in parsed.netloc and parsed.hostname != "localhost":
+        return False, "BLOCKED: Landing Page URL must include a valid domain name (e.g., https://www.milkbasket.com)."
+    return True, cleaned
+
+
 def validate_google_ads_copy(headlines: list[str], descriptions: list[str]) -> list[str]:
-    """Return a list of any Google Ads character-limit violations (30/90 rule)."""
+    """Return a list of Google Ads RSA copy issues (30/90 char rule and minimum asset counts)."""
     issues = []
+    unique_headlines = set()
     for h in headlines:
-        if len(h) > 30:
-            issues.append(f"Headline too long ({len(h)}/30 chars): '{h}'")
+        text = str(h).strip()
+        if not text:
+            issues.append("Empty headline found.")
+            continue
+        unique_headlines.add(text)
+        if len(text) > 30:
+            issues.append(f"Headline too long ({len(text)}/30 chars): '{text}'")
+
+    unique_descriptions = set()
     for d in descriptions:
-        if len(d) > 90:
-            issues.append(f"Description too long ({len(d)}/90 chars): '{d}'")
+        text = str(d).strip()
+        if not text:
+            issues.append("Empty description found.")
+            continue
+        unique_descriptions.add(text)
+        if len(text) > 90:
+            issues.append(f"Description too long ({len(text)}/90 chars): '{text}'")
+
+    if len(unique_headlines) < 3:
+        issues.append(f"Google Ads requires at least 3 unique headlines (found {len(unique_headlines)}).")
+    if len(unique_descriptions) < 2:
+        issues.append(f"Google Ads requires at least 2 unique descriptions (found {len(unique_descriptions)}).")
     return issues
